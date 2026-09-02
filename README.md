@@ -17,7 +17,10 @@ Senior High English 3500-Word Trainer — E.D. STUDIO
 
 ## 部署（GitHub Pages）
 本目录即为 GitHub Pages 站点根目录：`index.html` 为入口。
-在仓库 Settings → Pages 选择 `main` 分支 `/root` 即可发布，获得一个可在任意电脑点击打开的链接。
+仓库 Settings → Pages 已配置为 `main` 分支 `/root`。
+
+**在线访问（可在任意电脑点击打开）：**
+https://evaniadym1997-cloud.github.io/3500-/
 
 ---
 E.D. STUDIO · 仅供离线平板教学使用
