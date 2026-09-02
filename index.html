@@ -199,6 +199,17 @@ input:focus, textarea:focus, select:focus { border-color: var(--primary); box-sh
   min-width: 56px; text-align: center; flex-shrink: 0;
 }
 
+/* Admin free-training banner */
+.free-banner {
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  padding: 8px 14px;
+}
+.free-banner.hidden { display: none !important; }
+
 /* Study / Quiz content */
 .content-body { flex: 1; overflow-y: auto; padding: 14px 16px; padding-bottom: 120px; }
 .word-header {
@@ -477,6 +488,11 @@ textarea { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 13px; 
             <p class="subtitle" style="margin-top:8px;font-size:12px;opacity:.7;" id="export-note">导出为离线文件，生成后会自动下载到本机；如需在其他电脑打开，请把部署后的应用链接发给同事，或把生成的文件通过微信/网盘分享。</p>
           </div>
           <div class="mgr-card" id="overview-msg"></div>
+          <div class="mgr-card" style="border-left:4px solid var(--accent);">
+            <h3 style="margin-top:0;">🎯 管理员自由训练</h3>
+            <p class="subtitle">进入学习页自由练习（不限使用时间段）。本模式下的答题进度<b>不会</b>记入任何学生，也不计入班级正确率与易错词统计，仅供教师本人熟悉题目与备课使用。</p>
+            <button class="btn btn-primary" id="mgr-free-train">进入自由训练</button>
+          </div>
         </div>
 
         <!-- Students -->
@@ -651,6 +667,7 @@ textarea { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 13px; 
     <!-- Study -->
     <section id="study" class="screen">
       <div class="topbar"><button class="topbar-icon" id="study-back">‹</button><div class="topbar-title topbar-unit"><span class="unit-current" id="unit-current-study">Unit 1</span><div class="unit-scroll" id="unit-scroll-study"></div><input type="number" class="unit-jump" id="unit-jump-study" min="1" max="78" placeholder="#"></div><div class="progress-counter" style="font-size:14px;color:var(--text2);">1/20</div></div>
+      <div class="free-banner hidden" id="free-banner-study">🎯 管理员自由训练 · 进度不计入班级统计</div>
       <div class="content-body" id="study-content"></div>
       <div class="bottombar">
         <div class="progress-mini"><span class="dot"></span><span class="progress-correct">正确 0/0</span></div>
@@ -662,6 +679,7 @@ textarea { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 13px; 
     <!-- Translation Quiz -->
     <section id="trans" class="screen">
       <div class="topbar"><button class="topbar-icon" id="trans-back">‹</button><div class="topbar-title topbar-unit"><span class="unit-current" id="unit-current-trans">Unit 1</span><div class="unit-scroll" id="unit-scroll-trans"></div><input type="number" class="unit-jump" id="unit-jump-trans" min="1" max="78" placeholder="#"></div><div class="progress-counter" style="font-size:14px;color:var(--text2);">1/20</div></div>
+      <div class="free-banner hidden" id="free-banner-trans">🎯 管理员自由训练 · 进度不计入班级统计</div>
       <div class="content-body" id="trans-content"></div>
       <div class="bottombar">
         <div class="progress-mini"><span class="dot"></span><span class="progress-correct">正确 0/0</span></div>
@@ -672,6 +690,7 @@ textarea { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 13px; 
     <!-- Blank Quiz -->
     <section id="blank" class="screen">
       <div class="topbar"><button class="topbar-icon" id="blank-back">‹</button><div class="topbar-title topbar-unit"><span class="unit-current" id="unit-current-blank">Unit 1</span><div class="unit-scroll" id="unit-scroll-blank"></div><input type="number" class="unit-jump" id="unit-jump-blank" min="1" max="78" placeholder="#"></div><div class="progress-counter" style="font-size:14px;color:var(--text2);">1/20</div></div>
+      <div class="free-banner hidden" id="free-banner-blank">🎯 管理员自由训练 · 进度不计入班级统计</div>
       <div class="content-body" id="blank-content"></div>
       <div class="bottombar">
         <div class="progress-mini"><span class="dot"></span><span class="progress-correct">正确 0/0</span></div>
@@ -842,6 +861,7 @@ textarea { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 13px; 
     cur: null,
     curId: null,
     role: null,
+    freeTraining: false,
     mgrTab: 'overview',
     sortBy: 'lastActive',
     sortDir: 'desc',
@@ -941,8 +961,38 @@ textarea { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 13px; 
 
   // ===== Home =====
   function goHome() {
+    if (state.freeTraining) { exitFreeTraining(); return; }
     setScreen('home');
     renderHome();
+  }
+  function freeTrainingStudent() {
+    return {
+      name: '管理员·自由训练', isGuest: false,
+      mastered: [], wrong: {}, days: {},
+      dailyCorrect: 0, dailyDate: todayStr(),
+      totalCorrect: 0, totalAnswered: 0, lastActive: null
+    };
+  }
+  function enterFreeTraining() {
+    state.freeTraining = true;
+    state.role = 'admin';
+    state.cur = freeTrainingStudent();
+    state.curId = null;
+    state.selectedUnits = [...units];
+    state.filter = 'all';
+    state.step = 0;
+    startSession();
+  }
+  function exitFreeTraining() {
+    state.freeTraining = false;
+    state.cur = null;
+    state.curId = null;
+    ['study','trans','blank'].forEach(m => {
+      const b = $('#free-banner-' + m);
+      if (b) b.classList.add('hidden');
+    });
+    setScreen('manager');
+    renderManager();
   }
   function renderHome() {
     const c = state.cur || { mastered: [], wrong: {}, dailyCorrect: 0, totalCorrect: 0, name: '', isGuest: false };
@@ -1031,6 +1081,10 @@ textarea { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 13px; 
     if (!w) return;
     const counter = `第 ${state.index+1}/${state.queue.length} 词`;
     $$('.progress-counter').forEach(e => e.textContent = counter);
+    ['study','trans','blank'].forEach(m => {
+      const b = $('#free-banner-' + m);
+      if (b) b.classList.toggle('hidden', !state.freeTraining);
+    });
     renderUnitScroller(w.unit);
     if (state.step === 0) renderStudy(w);
     else if (state.step === 1) renderTrans(w);
@@ -1213,6 +1267,13 @@ textarea { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 13px; 
 
   function updateProgress(w, correct) {
     if (!state.cur) return;
+    // Admin free-training: tally only in-session counters, never persist to any student record.
+    if (state.freeTraining) {
+      state.session.answered++;
+      if (correct) state.session.correct++;
+      $$('.progress-correct').forEach(e => e.textContent = `正确 ${state.session.correct}/${state.session.answered}`);
+      return;
+    }
     if (state.session.answered === 0) {
       if (state.cur.dailyDate !== todayStr()) { state.cur.dailyDate = todayStr(); state.cur.dailyCorrect = 0; }
     }
@@ -1272,7 +1333,7 @@ textarea { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 13px; 
           <div class="stat-box" style="background:var(--danger-bg);"><div class="stat-num">${s.answered - s.correct}</div><div class="stat-label">错误</div></div>
           <div class="stat-box" style="background:var(--primary-light);"><div class="stat-num">${pct}%</div><div class="stat-label">正确率</div></div>
         </div>
-        ${state.cur ? `<div class="subtitle mt-1" style="font-size:12px;">进度已记录到「${esc(state.cur.name || '')}」名下</div>` : ''}
+        ${state.cur ? `<div class="subtitle mt-1" style="font-size:12px;">${state.freeTraining ? '本次为管理员自由训练，进度<b>未计入</b>任何学生' : '进度已记录到「' + esc(state.cur.name || '') + '」名下'}</div>` : ''}
       </div>
     `;
     if (isCloudConfigured() && state.curId) cloudPushOne(state.curId, true);
@@ -1893,6 +1954,10 @@ create policy "anon full access" on public.vocab_progress
     $('#export-all-errorwords').onclick = () => triggerExport('both');
     $('#export-docx-only').onclick = () => triggerExport('docx');
     $('#export-pptx-only').onclick = () => triggerExport('pptx');
+    $('#mgr-free-train').onclick = () => {
+      if (!isCloudConfigured()) { /* free training works fully offline */ }
+      enterFreeTraining();
+    };
     $('#wrong-export').onclick = () => {
       const rows = $$('#wrong-table tbody tr');
       if (!rows.length) { appAlert('暂无错题数据'); return; }
