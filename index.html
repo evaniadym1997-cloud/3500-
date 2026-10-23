@@ -1729,7 +1729,7 @@ create policy "anon full access" on public.vocab_progress
   }
   async function initDB() {
     if (_cbRdb) return _cbRdb;
-    const mod = await import('https://esm.sh/@cloudbase/js-sdk@3.10.3');
+    const mod = await import('https://cdn.jsdelivr.net/npm/@cloudbase/js-sdk@3.10.3/+esm');
     const cloudbase = mod.default || mod;
     const app = cloudbase.init({
       env: settings.sync.envId,
