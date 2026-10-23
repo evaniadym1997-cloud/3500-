@@ -596,15 +596,15 @@ textarea { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 13px; 
         <!-- Sync -->
         <div class="mgr-pane hidden" data-pane="sync">
           <div class="mgr-card">
-            <h3>跨设备同步（Supabase REST）</h3>
-            <p class="subtitle">填入你的 <b>Supabase</b> 项目 URL 和 <b>anon</b> 公钥，平板即可在登录/退出时自动上传与拉取全班的进度数据。需要联网。</p>
-            <div class="form-group"><label class="form-label">Project URL</label>
-              <input type="url" id="sync-url" placeholder="https://xxxx.supabase.co">
+            <h3>跨设备同步（腾讯云 CloudBase）</h3>
+            <p class="subtitle">填入 <b>环境 ID</b> 和 <b>Publishable Key</b>，平板即可在登录/退出时自动上传与拉取全班进度。需要联网。</p>
+            <div class="form-group"><label class="form-label">环境 ID (envId)</label>
+              <input type="text" id="sync-envid" placeholder="language-vocab-xxxxxx">
             </div>
-            <div class="form-group"><label class="form-label">anon public key</label>
-              <input type="password" id="sync-key" placeholder="eyJhbGciOi...">
+            <div class="form-group"><label class="form-label">Publishable Key（前端公钥）</label>
+              <input type="password" id="sync-pubkey" placeholder="在 CloudBase 控制台「身份认证」→「凭证管理」获取">
             </div>
-            <div class="form-group"><label class="form-label">数据表名</label>
+            <div class="form-group"><label class="form-label">表名</label>
               <input type="text" id="sync-table" placeholder="vocab_progress" value="vocab_progress">
             </div>
             <div class="row" style="gap:8px;margin-top:6px;">
@@ -614,9 +614,19 @@ textarea { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 13px; 
               <span class="grow"></span>
               <span class="chip" id="sync-status">未配置</span>
             </div>
-            <p class="subtitle" style="margin-top:10px;">提示：表里每行 = 一个学生，主键 = <code>id</code>（学号），字段 <code>name</code>、<code>data</code>(jsonb)、<code>updated_at</code>。只需运行下方 SQL 一次即可建表。</p>
-            <details><summary style="cursor:pointer;color:var(--primary);">查看建表 SQL</summary>
-              <pre class="code" id="sync-sql"></pre>
+            <p class="subtitle" style="margin-top:10px;">提示：表里每行 = 一个学生，主键 = <code>id</code>（学号），字段 <code>name</code>、<code>data</code>(jsonb)、<code>updated_at</code>。首次使用前需在 SQL 编辑器运行下方脚本。</p>
+            <details><summary style="cursor:pointer;color:var(--primary);">查看首次配置 SQL</summary>
+              <pre class="code" id="sync-sql" style="white-space:pre-wrap;font-size:12px;line-height:1.6;">-- 在 CloudBase「SQL 型数据库」→「SQL 编辑器」中运行一次
+create table if not exists public.vocab_progress (
+  id text primary key,
+  name text,
+  data jsonb,
+  updated_at timestamptz default now()
+);
+alter table public.vocab_progress enable row level security;
+grant all on public.vocab_progress to anon;
+create policy "anon full access" on public.vocab_progress
+  for all to anon using (true) with check (true);</pre>
               <button class="btn btn-ghost btn-small" id="sync-copy-sql" style="margin-top:6px;">复制 SQL</button>
             </details>
           </div>
@@ -1404,7 +1414,7 @@ textarea { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 13px; 
     } else if (withP.length === 0) {
       $('#overview-msg').innerHTML = '<div class="alert info">名单已就绪（<b>' + all.length + '</b> 人），等待学生登录开始训练。</div>';
     } else {
-      $('#overview-msg').innerHTML = '<div class="alert ' + (isCloudConfigured() ? 'success' : 'info') + '">云端同步：' + (isCloudConfigured() ? '<b>已配置</b>，数据会跨设备同步' : '未配置 — 数据仅在本地浏览器；进入「云端同步」启用 Supabase 跨设备同步') + '。</div>';
+      $('#overview-msg').innerHTML = '<div class="alert ' + (isCloudConfigured() ? 'success' : 'info') + '">云端同步：' + (isCloudConfigured() ? '<b>已配置</b>，数据会跨设备同步' : '未配置 — 数据仅在本地浏览器；进入「云端同步」启用 CloudBase 跨设备同步') + '。</div>';
     }
     const es = $('#export-summary');
     if (es) {
@@ -1709,47 +1719,50 @@ textarea { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 13px; 
     return true;
   }
 
-  // ===== Sync =====
-  function isCloudConfigured() { return !!(settings.sync && settings.sync.url && settings.sync.key); }
+  // ===== Sync (CloudBase PostgreSQL via JS SDK) =====
+  let _cbRdb = null;
+  function isCloudConfigured() { return !!(settings.sync && settings.sync.envId && settings.sync.pubKey); }
   function setSyncStatus(s, ok) {
     const el2 = $('#sync-status');
     el2.textContent = s;
     el2.className = 'chip ' + (ok === true ? 'ok' : ok === false ? 'warn' : '');
   }
+  async function initDB() {
+    if (_cbRdb) return _cbRdb;
+    const mod = await import('https://esm.sh/@cloudbase/js-sdk@3.10.3');
+    const cloudbase = mod.default || mod;
+    const app = cloudbase.init({
+      env: settings.sync.envId,
+      accessKey: settings.sync.pubKey
+    });
+    _cbRdb = app.rdb();
+    return _cbRdb;
+  }
+  function tbl() { return settings.sync.table || 'vocab_progress'; }
   function renderSyncPane() {
-    $('#sync-url').value = settings.sync?.url || '';
-    $('#sync-key').value = settings.sync?.key || '';
+    $('#sync-envid').value = settings.sync?.envId || '';
+    $('#sync-pubkey').value = settings.sync?.pubKey || '';
     $('#sync-table').value = settings.sync?.table || 'vocab_progress';
     setSyncStatus(isCloudConfigured() ? '已配置' : '未配置', isCloudConfigured());
-    const sql = `-- 在 Supabase SQL Editor 中运行一次
-create table if not exists public.vocab_progress (
-  id text primary key,
-  name text,
-  data jsonb,
-  updated_at timestamptz default now()
-);
-alter table public.vocab_progress enable row level security;
-create policy "anon full access" on public.vocab_progress
-  for all to anon using (true) with check (true);`;
-    $('#sync-sql').textContent = sql;
-  }
-  function cloudHeaders() {
-    return { apikey: settings.sync.key, Authorization: 'Bearer ' + settings.sync.key, 'Content-Type': 'application/json' };
   }
   async function cloudTest() {
     if (!isCloudConfigured()) { setSyncStatus('未配置', false); return; }
     try {
-      const r = await fetch(`${settings.sync.url}/rest/v1/${settings.sync.table}?select=id&limit=1`, { headers: cloudHeaders() });
-      setSyncStatus(r.ok ? '已连接 ✓' : '连接失败 (' + r.status + ')', r.ok);
-    } catch (e) { setSyncStatus('连接失败', false); }
+      setSyncStatus('连接中…');
+      const db = await initDB();
+      const { data, error } = await db.from(tbl()).select('id').limit(1);
+      if (error) throw error;
+      setSyncStatus('已连接 ✓', true);
+    } catch (e) { setSyncStatus('连接失败: ' + (e.message || e), false); }
   }
   async function cloudPullAll() {
     if (!isCloudConfigured()) { setSyncStatus('未配置', false); return; }
     setSyncStatus('拉取中…');
     try {
-      const r = await fetch(`${settings.sync.url}/rest/v1/${settings.sync.table}?select=*`, { headers: cloudHeaders() });
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      const arr = await r.json();
+      const db = await initDB();
+      const { data, error } = await db.from(tbl()).select('*');
+      if (error) throw error;
+      const arr = data || [];
       let n = 0;
       for (const row of arr) {
         if (!row.id || !row.data) continue;
@@ -1767,16 +1780,15 @@ create policy "anon full access" on public.vocab_progress
       save();
       setSyncStatus('已拉取 ' + n, true);
       renderOverview();
-    } catch (e) { setSyncStatus('拉取失败', false); }
+    } catch (e) { setSyncStatus('拉取失败: ' + (e.message || e), false); }
   }
   async function cloudPullOne(id) {
     if (!isCloudConfigured() || !id) return;
     try {
-      const r = await fetch(`${settings.sync.url}/rest/v1/${settings.sync.table}?id=eq.${encodeURIComponent(id)}&select=*`, { headers: cloudHeaders() });
-      if (!r.ok) return;
-      const arr = await r.json();
-      if (!arr.length || !arr[0].data) return;
-      const row = arr[0];
+      const db = await initDB();
+      const { data, error } = await db.from(tbl()).select('*').eq('id', id);
+      if (error || !data || !data.length || !data[0].data) return;
+      const row = data[0];
       const local = store.students[id];
       if (!local) {
         store.students[id] = Object.assign(defaultStudent(), { name: row.name || row.data.name || '' }, row.data);
@@ -1800,29 +1812,24 @@ create policy "anon full access" on public.vocab_progress
     if (!isCloudConfigured() || !id) return;
     const p = store.students[id]; if (!p) return;
     try {
-      const body = [{ id: String(id), name: p.name || '', data: p, updated_at: new Date().toISOString() }];
-      const r = await fetch(`${settings.sync.url}/rest/v1/${settings.sync.table}`, {
-        method: 'POST',
-        headers: { ...cloudHeaders(), Prefer: 'resolution=merge-duplicates,return=minimal' },
-        body: JSON.stringify(body)
+      const db = await initDB();
+      await db.from(tbl()).upsert({
+        id: String(id), name: p.name || '', data: p, updated_at: new Date().toISOString()
       });
-      if (r.ok) setSyncStatus('已上传 ' + new Date().toLocaleTimeString().slice(0,5), true);
-      else setSyncStatus('上传失败 (' + r.status + ')', false);
-    } catch (e) { setSyncStatus('上传失败', false); }
+      setSyncStatus('已上传 ' + new Date().toLocaleTimeString().slice(0,5), true);
+    } catch (e) { setSyncStatus('上传失败: ' + (e.message || e), false); }
   }
   async function cloudPushAll() {
     if (!isCloudConfigured()) { setSyncStatus('未配置', false); return; }
     setSyncStatus('上传中…');
-    const rows = Object.entries(store.students).map(([id, p]) => ({ id: String(id), name: p.name || '', data: p, updated_at: new Date().toISOString() }));
-    if (!rows.length) { setSyncStatus('无本地数据', false); return; }
+    const entries = Object.entries(store.students);
+    if (!entries.length) { setSyncStatus('无本地数据', false); return; }
     try {
-      const r = await fetch(`${settings.sync.url}/rest/v1/${settings.sync.table}`, {
-        method: 'POST',
-        headers: { ...cloudHeaders(), Prefer: 'resolution=merge-duplicates,return=minimal' },
-        body: JSON.stringify(rows)
-      });
-      setSyncStatus(r.ok ? '已上传 ' + rows.length : '上传失败 (' + r.status + ')', r.ok);
-    } catch (e) { setSyncStatus('上传失败', false); }
+      const db = await initDB();
+      const rows = entries.map(([id, p]) => ({ id: String(id), name: p.name || '', data: p, updated_at: new Date().toISOString() }));
+      await db.from(tbl()).upsert(rows);
+      setSyncStatus('已上传 ' + rows.length, true);
+    } catch (e) { setSyncStatus('上传失败: ' + (e.message || e), false); }
   }
   function localExport() {
     const blob = new Blob([JSON.stringify({ settings, store }, null, 2)], { type: 'application/json' });
@@ -1936,13 +1943,14 @@ create policy "anon full access" on public.vocab_progress
         navigator.clipboard.writeText(t).then(() => appAlert('SQL 已复制到剪贴板'), () => showSql());
       } else { showSql(); }
     };
-    ['sync-url','sync-key','sync-table'].forEach(id => {
+    ['sync-envid','sync-pubkey','sync-table'].forEach(id => {
       $('#' + id).onchange = () => {
         settings.sync = settings.sync || {};
-        settings.sync.url = $('#sync-url').value.trim();
-        settings.sync.key = $('#sync-key').value.trim();
+        settings.sync.envId = $('#sync-envid').value.trim();
+        settings.sync.pubKey = $('#sync-pubkey').value.trim();
         settings.sync.table = $('#sync-table').value.trim() || 'vocab_progress';
         save();
+        _cbRdb = null;
         setSyncStatus(isCloudConfigured() ? '已配置' : '未配置', isCloudConfigured());
       };
     });
