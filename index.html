@@ -2033,6 +2033,8 @@ Suggested solution: `.concat(e.workaround)),new Error(r)},t.isWebSocketSupported
       save();
       // 云端尚无名单、本机有名单：本次上传做首次播种，避免老设备不点「上传」导致新设备拉不到。
       if (!cloudRosterCount && (settings.roster || []).length) cloudPushRoster();
+      // 云端整表为空、本机有数据：首次播种名单 + 全部学生进度（仅在云端为空时执行，不会覆盖既有云端数据）。
+      if (!arr.length && (Object.keys(store.students || {}).length || (settings.roster || []).length)) cloudPushAll();
       if (rosterRow || rosterCount) {
         renderRosterCurrent();
         if (state.mgrTab === 'roster') renderRoster();
