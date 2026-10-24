@@ -1952,6 +1952,17 @@ Suggested solution: `.concat(e.workaround)),new Error(r)},t.isWebSocketSupported
     el2.textContent = s;
     el2.className = 'chip ' + (ok === true ? 'ok' : ok === false ? 'warn' : '');
   }
+  // 把浏览器的 "Failed to fetch" 等网络层错误翻译成可操作提示（最常见：当前页面域名未加入 CloudBase 安全域名白名单）。
+  function cloudErrHint(e) {
+    let msg;
+    try { msg = (e && (e.message || String(e))) || String(e); } catch (x) { msg = '未知错误'; }
+    try {
+      if (/Failed to fetch|NetworkError|Load failed|fetch failed|CORS|403/i.test(msg)) {
+        return msg + '。提示：很可能是当前页面域名未在 CloudBase「安全域名」白名单中——请到腾讯云 CloudBase 控制台 → 本环境 → 安全域名/Web 安全域名 添加：' + (location.origin || location.host) + '；也可能是当前网络无法访问腾讯云接口。';
+      }
+    } catch (x) {}
+    return msg;
+  }
   async function initDB() {
     if (_cbRdb) return _cbRdb;
     for (let _i = 0; _i < 40 && !window.cloudbase; _i++) { await new Promise(r => setTimeout(r, 250)); }
@@ -2043,7 +2054,7 @@ Suggested solution: `.concat(e.workaround)),new Error(r)},t.isWebSocketSupported
       const { data, error } = await db.from(tbl()).select('id').limit(1);
       if (error) throw error;
       setSyncStatus('已连接 ✓', true);
-    } catch (e) { setSyncStatus('连接失败: ' + (e.message || e), false); }
+    } catch (e) { setSyncStatus('连接失败: ' + cloudErrHint(e), false); }
   }
   async function cloudPullAll() {
     if (!isCloudConfigured()) { setSyncStatus('未配置', false); return; }
@@ -2082,7 +2093,7 @@ Suggested solution: `.concat(e.workaround)),new Error(r)},t.isWebSocketSupported
       }
       setSyncStatus('已拉取 ' + n + ' 人 / 名单 ' + rosterCount, true);
       renderOverview();
-    } catch (e) { setSyncStatus('拉取失败: ' + (e.message || e), false); }
+    } catch (e) { setSyncStatus('拉取失败: ' + cloudErrHint(e), false); }
   }
   async function cloudPullOne(id) {
     if (!isCloudConfigured() || !id) return;
@@ -2111,7 +2122,7 @@ Suggested solution: `.concat(e.workaround)),new Error(r)},t.isWebSocketSupported
         id: rowKey(id), name: p.name || '', data: Object.assign({}, p, { classCode: cc() }), updated_at: new Date().toISOString()
       });
       setSyncStatus('已上传 ' + new Date().toLocaleTimeString().slice(0,5), true);
-    } catch (e) { setSyncStatus('上传失败: ' + (e.message || e), false); }
+    } catch (e) { setSyncStatus('上传失败: ' + cloudErrHint(e), false); }
   }
   async function cloudPushAll() {
     if (!isCloudConfigured()) { setSyncStatus('未配置', false); return; }
@@ -2123,7 +2134,7 @@ Suggested solution: `.concat(e.workaround)),new Error(r)},t.isWebSocketSupported
       rows.push({ id: rosterKey(), name: '__roster__', data: Object.assign({}, rosterPayload(), { classCode: cc() }), updated_at: new Date().toISOString() });
       await db.from(tbl()).upsert(rows);
       setSyncStatus('已上传 ' + entries.length + ' 人 + 名单 ' + (settings.roster || []).length, true);
-    } catch (e) { setSyncStatus('上传失败: ' + (e.message || e), false); }
+    } catch (e) { setSyncStatus('上传失败: ' + cloudErrHint(e), false); }
   }
   function localExport() {
     const blob = new Blob([JSON.stringify({ settings, store }, null, 2)], { type: 'application/json' });
