@@ -598,6 +598,7 @@ textarea { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 13px; 
           <div class="mgr-card">
             <h3>跨设备同步（腾讯云 CloudBase）</h3>
             <p class="subtitle">填入 <b>环境 ID</b> 和 <b>Publishable Key</b>，平板即可在登录/退出时自动上传与拉取全班进度。需要联网。</p>
+            <p class="subtitle" style="margin-top:8px;color:#974E0C;font-size:12px;">⚠️ 隐私提示：本页 envId / 公钥已随应用公开，任何拿到链接的人都能读取云端全表。请勿在「名单」中填写学生真实姓名，建议使用<b>学号</b>；如需严格隔离，请到 CloudBase 配置行级安全策略（RLS）或不要将密钥公开。</p>
             <div class="form-group"><label class="form-label">环境 ID (envId)</label>
               <input type="text" id="sync-envid" placeholder="language-vocab-xxxxxx">
             </div>
@@ -606,6 +607,13 @@ textarea { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 13px; 
             </div>
             <div class="form-group"><label class="form-label">表名</label>
               <input type="text" id="sync-table" placeholder="vocab_progress" value="vocab_progress">
+            </div>
+            <div class="form-group"><label class="form-label">班级码（数据隔离）</label>
+              <div class="row" style="gap:8px;">
+                <input type="text" id="sync-classcode" placeholder="如 高二7班_2026 或 G2026A" style="flex:1;">
+                <button class="btn btn-ghost btn-small" id="sync-classcode-rand" type="button">随机生成</button>
+              </div>
+              <p class="subtitle" style="margin-top:6px;font-size:12px;" id="sync-classcode-note"></p>
             </div>
             <div class="row" style="gap:8px;margin-top:6px;">
               <button class="btn btn-secondary" id="sync-test">测试连接</button>
@@ -1015,6 +1023,7 @@ Suggested solution: `.concat(e.workaround)),new Error(r)},t.isWebSocketSupported
       maxDuration: 60,
       roster: [],
       allowGuest: true,
+      classCode: '',
       sync: { url: '', key: '', table: 'vocab_progress' }
     };
   }
@@ -1956,9 +1965,36 @@ Suggested solution: `.concat(e.workaround)),new Error(r)},t.isWebSocketSupported
     return _cbRdb;
   }
   function tbl() { return settings.sync.table || 'vocab_progress'; }
+  // 班级码：在共享表环境下隔离不同班级数据（行 id 前缀 + data.classCode 双重隔离，无需改表结构）。
+  function cc() { return (settings.classCode && String(settings.classCode).trim()) || '__default__'; }
+  function rowKey(id) { return cc() + '::' + String(id); }
+  function rosterKey() { return '__roster__::' + cc(); }
 
   // 名单（roster）与学生学习进度同表存储，用保留行 id 区分，避免新增表结构。
   const ROSTER_ROW_ID = '__roster__';
+  // 字段级累加合并：本地与云端同一学生的进度取并集（易错词/已掌握/每日记录），标量取较大值，
+  // 避免「整行覆盖」导致另一台设备已练的进度被丢弃。
+  function mergeStudent(local, remote, name) {
+    local = local || defaultStudent();
+    remote = remote || {};
+    const wrong = Object.assign({}, local.wrong || {});
+    const rw = remote.wrong || {};
+    for (const k in rw) wrong[k] = Math.max(Number(wrong[k]) || 0, Number(rw[k]) || 0);
+    const mastered = Array.from(new Set([].concat(local.mastered || [], remote.mastered || [])));
+    const days = Object.assign({}, local.days || {});
+    const rd = remote.days || {};
+    for (const d in rd) days[d] = Math.max(Number(days[d]) || 0, Number(rd[d]) || 0);
+    const lt = local.lastActive || '', ct = remote.lastActive || '';
+    return Object.assign({}, defaultStudent(), local, {
+      name: name || local.name,
+      wrong: wrong,
+      mastered: mastered,
+      days: days,
+      totalAnswered: Math.max(Number(local.totalAnswered) || 0, Number(remote.totalAnswered) || 0),
+      totalCorrect: Math.max(Number(local.totalCorrect) || 0, Number(remote.totalCorrect) || 0),
+      lastActive: (ct > lt) ? ct : lt
+    });
+  }
   function rosterPayload() {
     return {
       roster: (settings.roster || []).map(r => ({ name: String(r.name || ''), id: String(r.id || '') })),
@@ -1969,7 +2005,8 @@ Suggested solution: `.concat(e.workaround)),new Error(r)},t.isWebSocketSupported
     if (!isCloudConfigured()) return;
     try {
       const db = await initDB();
-      await db.from(tbl()).upsert({ id: ROSTER_ROW_ID, name: '__roster__', data: rosterPayload(), updated_at: new Date().toISOString() });
+      const payload = rosterPayload(); payload.classCode = cc();
+      await db.from(tbl()).upsert({ id: rosterKey(), name: '__roster__', data: payload, updated_at: new Date().toISOString() });
     } catch (e) { /* 名单上传失败不阻塞教学流程，下次点「上传」会再试 */ }
   }
   function mergeCloudRoster(cloudRoster) {
@@ -1992,6 +2029,10 @@ Suggested solution: `.concat(e.workaround)),new Error(r)},t.isWebSocketSupported
     $('#sync-envid').value = settings.sync?.envId || '';
     $('#sync-pubkey').value = settings.sync?.pubKey || '';
     $('#sync-table').value = settings.sync?.table || 'vocab_progress';
+    $('#sync-classcode').value = settings.classCode || '';
+    $('#sync-classcode-note').textContent = (settings.classCode && String(settings.classCode).trim())
+      ? ('当前班级码：' + cc() + '（仅同步该班级的数据）')
+      : '未设置班级码：默认归到「__default__」，建议设置唯一班级码以隔离不同班级。';
     setSyncStatus(isCloudConfigured() ? '已配置' : '未配置', isCloudConfigured());
   }
   async function cloudTest() {
@@ -2011,21 +2052,21 @@ Suggested solution: `.concat(e.workaround)),new Error(r)},t.isWebSocketSupported
       const db = await initDB();
       const { data, error } = await db.from(tbl()).select('*');
       if (error) throw error;
-      const arr = data || [];
+      // 仅保留本班级的数据：data.classCode 匹配；遗留旧数据（无 classCode）归到默认班级 '__default__'。
+      const arr = (data || []).filter(r => {
+        const c = r && r.data && r.data.classCode;
+        return c ? (c === cc()) : (cc() === '__default__');
+      });
       let n = 0;
       let rosterRow = null;
+      const pre = cc() + '::';
       for (const row of arr) {
-        if (row && row.id === ROSTER_ROW_ID) { rosterRow = row; continue; }
+        if (row && row.id === rosterKey()) { rosterRow = row; continue; }
         if (!row.id || !row.data) continue;
-        const local = store.students[row.id];
-        if (!local) {
-          store.students[row.id] = Object.assign(defaultStudent(), { name: row.name || row.data.name || '' }, row.data);
-        } else {
-          const lt = local.lastActive || '', ct = row.data.lastActive || '';
-          if (ct > lt) {
-            store.students[row.id] = Object.assign({}, defaultStudent(), local, row.data, { name: row.name || local.name });
-          }
-        }
+        const rawId = String(row.id).startsWith(pre) ? String(row.id).slice(pre.length) : String(row.id);
+        const local = store.students[rawId];
+        // 字段级累加合并：并集易错词/已掌握/每日记录，标量取较大值，避免任一设备进度丢失。
+        store.students[rawId] = mergeStudent(local, row.data, row.name || row.data.name || (local && local.name) || '');
         n++;
       }
       const cloudRosterCount = (rosterRow && rosterRow.data && Array.isArray(rosterRow.data.roster)) ? rosterRow.data.roster.length : 0;
@@ -2047,20 +2088,12 @@ Suggested solution: `.concat(e.workaround)),new Error(r)},t.isWebSocketSupported
     if (!isCloudConfigured() || !id) return;
     try {
       const db = await initDB();
-      const { data, error } = await db.from(tbl()).select('*').eq('id', id);
+      const { data, error } = await db.from(tbl()).select('*').eq('id', rowKey(id));
       if (error || !data || !data.length || !data[0].data) return;
       const row = data[0];
       const local = store.students[id];
-      if (!local) {
-        store.students[id] = Object.assign(defaultStudent(), { name: row.name || row.data.name || '' }, row.data);
-        save();
-      } else {
-        const lt = local.lastActive || '', ct = row.data.lastActive || '';
-        if (ct > lt) {
-          store.students[id] = Object.assign({}, defaultStudent(), local, row.data, { name: row.name || local.name });
-          save();
-        }
-      }
+      store.students[id] = mergeStudent(local, row.data, row.name || row.data.name || (local && local.name) || '');
+      save();
     } catch (e) { /* silent */ }
   }
   let _pushTimer = null;
@@ -2075,7 +2108,7 @@ Suggested solution: `.concat(e.workaround)),new Error(r)},t.isWebSocketSupported
     try {
       const db = await initDB();
       await db.from(tbl()).upsert({
-        id: String(id), name: p.name || '', data: p, updated_at: new Date().toISOString()
+        id: rowKey(id), name: p.name || '', data: Object.assign({}, p, { classCode: cc() }), updated_at: new Date().toISOString()
       });
       setSyncStatus('已上传 ' + new Date().toLocaleTimeString().slice(0,5), true);
     } catch (e) { setSyncStatus('上传失败: ' + (e.message || e), false); }
@@ -2086,8 +2119,8 @@ Suggested solution: `.concat(e.workaround)),new Error(r)},t.isWebSocketSupported
     const entries = Object.entries(store.students);
     try {
       const db = await initDB();
-      const rows = entries.map(([id, p]) => ({ id: String(id), name: p.name || '', data: p, updated_at: new Date().toISOString() }));
-      rows.push({ id: ROSTER_ROW_ID, name: '__roster__', data: rosterPayload(), updated_at: new Date().toISOString() });
+      const rows = entries.map(([id, p]) => ({ id: rowKey(id), name: p.name || '', data: Object.assign({}, p, { classCode: cc() }), updated_at: new Date().toISOString() }));
+      rows.push({ id: rosterKey(), name: '__roster__', data: Object.assign({}, rosterPayload(), { classCode: cc() }), updated_at: new Date().toISOString() });
       await db.from(tbl()).upsert(rows);
       setSyncStatus('已上传 ' + entries.length + ' 人 + 名单 ' + (settings.roster || []).length, true);
     } catch (e) { setSyncStatus('上传失败: ' + (e.message || e), false); }
@@ -2215,6 +2248,17 @@ Suggested solution: `.concat(e.workaround)),new Error(r)},t.isWebSocketSupported
         setSyncStatus(isCloudConfigured() ? '已配置' : '未配置', isCloudConfigured());
       };
     });
+    $('#sync-classcode').onchange = () => {
+      settings.classCode = $('#sync-classcode').value.trim();
+      save();
+      renderSyncPane();
+    };
+    $('#sync-classcode-rand').onclick = () => {
+      const r = Math.random().toString(36).slice(2, 8).toUpperCase();
+      settings.classCode = 'CLASS-' + r;
+      save();
+      renderSyncPane();
+    };
     $('#sync-local-export').onclick = localExport;
     $('#sync-local-import').onchange = e => { const f = e.target.files[0]; if (f) localImport(f); e.target.value = ''; };
 
