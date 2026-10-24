@@ -998,6 +998,15 @@ Suggested solution: `.concat(e.workaround)),new Error(r)},t.isWebSocketSupported
   const STORE_KEY = 'vocab_v2';
   const SETTINGS_KEY = 'vocab_settings_v2';
 
+  // 云端同步默认配置（publishable/anon key，公开可见，仅含匿名读写权限）。
+  // 内置后，新设备（换手机 / 换平板）首次打开即自动连上云端并恢复名单与进度，
+  // 不需要管理员再手工填写 envId / pubKey。
+  const SYNC_FALLBACK = {
+    envId: 'language-vocab-d7g1drb08b7bcb94a',
+    pubKey: 'eyJhbGciOiJSUzI1NiIsImtpZCI6ImQ1M2QwYWJkLWJmYjMtNDFhNy1hYWFiLTA2NzkxZDJmZTY4OSJ9.eyJpc3MiOiJodHRwczovL2xhbmd1YWdlLXZvY2FiLWQ3ZzFkcmIwOGI3YmNiOTRhLmFwLXNoYW5naGFpLnRjYi1hcGkudGVuY2VudGNsb3VkYXBpLmNvbSIsInN1YiI6ImFub24iLCJhdWQiOiJsYW5ndWFnZS12b2NhYi1kN2cxZHJiMDhiN2JjYjk0YSIsImV4cCI6NDA5MzA0ODY3MCwiaWF0IjoxNzg5MzY1NDcwLCJub25jZSI6Il9jY0JycmNfUW8yNzNxUWpVdFVFSWciLCJhdF9oYXNoIjoiX2NjQnJyY19RbzI3M3FRalV0VUVJZyIsIm5hbWUiOiJBbm9ueW1vdXMiLCJzY29wZSI6ImFub255bW91cyIsInByb2plY3RfaWQiOiJsYW5ndWFnZS12b2NhYi1kN2cxZHJiMDhiN2JjYjk0YSIsIm1ldGEiOnsicGxhdGZvcm0iOiJQdWJsaXNoYWJsZUtleSJ9LCJyb2xlIjoiYW5vbiIsImlzX2Fub255bW91cyI6dHJ1ZSwiYXBwX21ldGFkYXRhIjp7InByb3ZpZGVyIjoiYW5vbnltb3VzIiwicHJvdmlkZXJzIjpbImFub255bW91cyJdfSwidXNlcl9tZXRhZGF0YSI6eyJuYW1lIjoiQW5vbnltb3VzIn0sInVzZXJfdHlwZSI6IiIsImNsaWVudF90eXBlIjoiY2xpZW50X3VzZXIiLCJpc19zeXN0ZW1fYWRtaW4iOmZhbHNlfQ.mJxPDl41NkhsN3d3gHdB1s-QTteF9tYWnPD1onJWUBd3qG6TpeJNvhxkvQ58UWDFj__PgYl5UCNUCE8Q1euu1_5pKgANmPfIQ3SP_Rs0t1-LRXSpEtVmGREAfYXyKkBOCVqnbKtApF6AhjkMKmIBJY6vr__D8f8aRR5lWwxGudQnr9fdNSRArxJ4fSAFPxMfa-dv7YgSph4fGXPVmeZvEFqvKMdqBhpLeyCQBBylIHuk3pvD0VlLn8o-Lqp8zR_obWJLeT_GDabaUgPvZ1eAiGMOjZmeWynohWjNxCSWb2pMv2yygDRG6Q-O0zSKmrt2rbp6IFBqXbWUzpmtIe1-8g',
+    table: 'vocab_progress'
+  };
+
   function defaultSettings() {
     return {
       managerPass: '123456',
@@ -1025,6 +1034,10 @@ Suggested solution: `.concat(e.workaround)),new Error(r)},t.isWebSocketSupported
   }
 
   let settings = Object.assign(defaultSettings(), JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null'));
+  settings.sync = Object.assign({}, SYNC_FALLBACK, settings.sync || {});
+  if (!settings.sync.envId) settings.sync.envId = SYNC_FALLBACK.envId;
+  if (!settings.sync.pubKey) settings.sync.pubKey = SYNC_FALLBACK.pubKey;
+  if (!settings.sync.table) settings.sync.table = SYNC_FALLBACK.table;
   let store = Object.assign({ students: {} }, JSON.parse(localStorage.getItem(STORE_KEY) || 'null'));
   if (!store.students) store.students = {};
 
@@ -1736,6 +1749,7 @@ Suggested solution: `.concat(e.workaround)),new Error(r)},t.isWebSocketSupported
         if (!(await appConfirm('删除学生 ' + b.dataset.del + '？该学生已有进度不会被删除（移出名单后变为游客）。'))) return;
         settings.roster = (settings.roster || []).filter(x => String(x.id) !== b.dataset.del);
         save(); renderRosterCurrent(); renderOverview();
+        cloudPushRoster();
       };
     });
   }
@@ -1757,10 +1771,12 @@ Suggested solution: `.concat(e.workaround)),new Error(r)},t.isWebSocketSupported
       const seen = new Set((settings.roster || []).map(r => String(r.id)));
       for (const r of ready) if (!seen.has(String(r.id))) settings.roster.push({ name: r.name, id: String(r.id) });
       save(); renderRosterCurrent(); renderOverview();
+      cloudPushRoster();
       appAlert('已追加 ' + ready.length + ' 人');
     } else if (await appConfirm('确定覆盖：清空当前名单后导入？', '覆盖导入', '取消')) {
       settings.roster = ready.map(r => ({ name: r.name, id: String(r.id) }));
       save(); renderRosterCurrent(); renderOverview();
+      cloudPushRoster();
       appAlert('已覆盖为 ' + ready.length + ' 人');
     }
   }
@@ -1940,6 +1956,38 @@ Suggested solution: `.concat(e.workaround)),new Error(r)},t.isWebSocketSupported
     return _cbRdb;
   }
   function tbl() { return settings.sync.table || 'vocab_progress'; }
+
+  // 名单（roster）与学生学习进度同表存储，用保留行 id 区分，避免新增表结构。
+  const ROSTER_ROW_ID = '__roster__';
+  function rosterPayload() {
+    return {
+      roster: (settings.roster || []).map(r => ({ name: String(r.name || ''), id: String(r.id || '') })),
+      updatedAt: new Date().toISOString()
+    };
+  }
+  async function cloudPushRoster() {
+    if (!isCloudConfigured()) return;
+    try {
+      const db = await initDB();
+      await db.from(tbl()).upsert({ id: ROSTER_ROW_ID, name: '__roster__', data: rosterPayload(), updated_at: new Date().toISOString() });
+    } catch (e) { /* 名单上传失败不阻塞教学流程，下次点「上传」会再试 */ }
+  }
+  function mergeCloudRoster(cloudRoster) {
+    if (!Array.isArray(cloudRoster) || !cloudRoster.length) return (settings.roster || []).length;
+    const map = new Map();
+    for (const r of cloudRoster) {
+      const id = String((r && r.id) || '').trim();
+      if (!id) continue;
+      map.set(id, { name: String((r && r.name) || '').trim(), id: id });
+    }
+    for (const r of (settings.roster || [])) {
+      const id = String((r && r.id) || '').trim();
+      if (!id) continue;
+      if (!map.has(id)) map.set(id, { name: String((r && r.name) || '').trim(), id: id });
+    }
+    settings.roster = Array.from(map.values());
+    return settings.roster.length;
+  }
   function renderSyncPane() {
     $('#sync-envid').value = settings.sync?.envId || '';
     $('#sync-pubkey').value = settings.sync?.pubKey || '';
@@ -1965,7 +2013,9 @@ Suggested solution: `.concat(e.workaround)),new Error(r)},t.isWebSocketSupported
       if (error) throw error;
       const arr = data || [];
       let n = 0;
+      let rosterRow = null;
       for (const row of arr) {
+        if (row && row.id === ROSTER_ROW_ID) { rosterRow = row; continue; }
         if (!row.id || !row.data) continue;
         const local = store.students[row.id];
         if (!local) {
@@ -1978,8 +2028,13 @@ Suggested solution: `.concat(e.workaround)),new Error(r)},t.isWebSocketSupported
         }
         n++;
       }
+      const rosterCount = (rosterRow && rosterRow.data) ? mergeCloudRoster(rosterRow.data.roster) : (settings.roster || []).length;
       save();
-      setSyncStatus('已拉取 ' + n, true);
+      if (rosterRow) {
+        renderRosterCurrent();
+        if (state.mgrTab === 'roster') renderRoster();
+      }
+      setSyncStatus('已拉取 ' + n + ' 人 / 名单 ' + rosterCount, true);
       renderOverview();
     } catch (e) { setSyncStatus('拉取失败: ' + (e.message || e), false); }
   }
@@ -2024,12 +2079,12 @@ Suggested solution: `.concat(e.workaround)),new Error(r)},t.isWebSocketSupported
     if (!isCloudConfigured()) { setSyncStatus('未配置', false); return; }
     setSyncStatus('上传中…');
     const entries = Object.entries(store.students);
-    if (!entries.length) { setSyncStatus('无本地数据', false); return; }
     try {
       const db = await initDB();
       const rows = entries.map(([id, p]) => ({ id: String(id), name: p.name || '', data: p, updated_at: new Date().toISOString() }));
+      rows.push({ id: ROSTER_ROW_ID, name: '__roster__', data: rosterPayload(), updated_at: new Date().toISOString() });
       await db.from(tbl()).upsert(rows);
-      setSyncStatus('已上传 ' + rows.length, true);
+      setSyncStatus('已上传 ' + entries.length + ' 人 + 名单 ' + (settings.roster || []).length, true);
     } catch (e) { setSyncStatus('上传失败: ' + (e.message || e), false); }
   }
   function localExport() {
@@ -2129,7 +2184,7 @@ Suggested solution: `.concat(e.workaround)),new Error(r)},t.isWebSocketSupported
       } catch (e) { appAlert('解析失败：' + (e.message || e)); }
     }
     $('#roster-clear').onclick = async () => {
-      if (await appConfirm('清空当前名单？学生已有进度不会被删除。')) { settings.roster = []; save(); renderRosterCurrent(); }
+      if (await appConfirm('清空当前名单？学生已有进度不会被删除。')) { settings.roster = []; save(); renderRosterCurrent(); cloudPushRoster(); }
     };
     $('#roster-apply').onclick = applyRoster;
 
@@ -2185,6 +2240,9 @@ Suggested solution: `.concat(e.workaround)),new Error(r)},t.isWebSocketSupported
 
     setScreen('access');
     switchLoginTab('student');
+
+    // 每次打开（含换手机 / 换平板等新设备）自动从云端恢复名单与进度，无需手动点「拉取」。
+    if (isCloudConfigured()) setTimeout(() => { cloudPullAll(); }, 800);
   }
 
 
