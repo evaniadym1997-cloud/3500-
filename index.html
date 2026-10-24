@@ -2028,9 +2028,12 @@ Suggested solution: `.concat(e.workaround)),new Error(r)},t.isWebSocketSupported
         }
         n++;
       }
+      const cloudRosterCount = (rosterRow && rosterRow.data && Array.isArray(rosterRow.data.roster)) ? rosterRow.data.roster.length : 0;
       const rosterCount = (rosterRow && rosterRow.data) ? mergeCloudRoster(rosterRow.data.roster) : (settings.roster || []).length;
       save();
-      if (rosterRow) {
+      // 云端尚无名单、本机有名单：本次上传做首次播种，避免老设备不点「上传」导致新设备拉不到。
+      if (!cloudRosterCount && (settings.roster || []).length) cloudPushRoster();
+      if (rosterRow || rosterCount) {
         renderRosterCurrent();
         if (state.mgrTab === 'roster') renderRoster();
       }
